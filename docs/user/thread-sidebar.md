@@ -326,6 +326,11 @@ Choose **Snooze → Custom…** from a thread's menu to pick a date and time in 
 local time zone, or a duration in minutes, hours, or days. Durations start when
 you confirm; one day means 24 hours. On web and desktop, you can also snooze
 several selected threads together. Choose **Wake thread** to bring a thread back early.
+
+When a thread's provider is out of usage, the snooze menu also offers **Until limits reset**,
+which wakes the thread once its provider and model can run again. If several limits are
+used up, it waits for the last one. On web and desktop it works for several selected threads
+on the same provider; it is unavailable when the selection mixes providers.
 A snoozed thread keeps working and stays hidden until its wake time, even while
 its agent wakes itself for background work. It comes back early only when it needs
 an approval or answer from you, when a run fails, or when you send it a message.
