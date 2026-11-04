@@ -174,6 +174,7 @@ import { cn } from "~/lib/utils";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import {
   buildDraftActionMenuItems,
+  buildSnoozeMenuChildren,
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
 } from "./threadActionMenu.logic";
@@ -224,7 +225,9 @@ import { SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import {
   pickSnoozePreset,
+  resolveLimitResetSnooze,
   resolveSnoozePresets,
+  shownSnoozePresets,
   snoozeWakeLabel,
   type SnoozePreset,
 } from "./Sidebar.snooze";
@@ -2319,6 +2322,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         timestampFormat,
         selectedThreads[0]!.environmentId,
       );
+      const limitResetSnooze = resolveLimitResetSnooze(
+        selectedThreads,
+        menuOpenedAt,
+        timestampFormat,
+      );
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
@@ -2336,19 +2344,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     id: "snooze",
                     label: `Snooze (${count})`,
                     disabled: !canOperateThreads(selectedThreads),
-                    children: [
-                      ...snoozePresets.map((preset) => ({
-                        id: `snooze:${preset.id}`,
-                        label: `${preset.label} (${preset.whenLabel})`,
-                        disabled: !canOperateThreads(selectedThreads),
-                      })),
-                      {
-                        id: "snooze:custom",
-                        label: "Custom…",
-                        separatorBefore: snoozePresets.length > 0,
-                        disabled: !canOperateThreads(selectedThreads),
-                      },
-                    ],
+                    children: buildSnoozeMenuChildren(snoozePresets, limitResetSnooze).map(
+                      (child) =>
+                        canOperateThreads(selectedThreads) ? child : { ...child, disabled: true },
+                    ),
                   },
                 ]
               : []),
@@ -2394,7 +2393,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           clicked.value === "snooze:custom"
             ? await requestCustomSnooze()
             : pickSnoozePreset(
-                snoozePresets,
+                shownSnoozePresets(snoozePresets, limitResetSnooze),
                 clicked.value.slice("snooze:".length),
                 timestampFormat,
                 selectedThreads[0]!.environmentId,
@@ -2606,11 +2605,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
+        const menuOpenedAt = new Date();
         const snoozePresets = resolveSnoozePresets(
-          new Date(),
+          menuOpenedAt,
           timestampFormat,
           thread.environmentId,
         );
+        const limitResetSnooze = resolveLimitResetSnooze([thread], menuOpenedAt, timestampFormat);
         const threadProjectGroup =
           projectGroupsRef.current.find((project) =>
             project.memberProjectRefs.some(
@@ -2654,6 +2655,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 titleRegeneration: configLoaded,
               },
               snoozePresets,
+              limitResetSnooze,
             }),
             position,
           ),
@@ -2665,7 +2667,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             clicked.value === "snooze:custom"
               ? await requestCustomSnooze()
               : pickSnoozePreset(
-                  snoozePresets,
+                  shownSnoozePresets(snoozePresets, limitResetSnooze),
                   clicked.value.slice("snooze:".length),
                   timestampFormat,
                   thread.environmentId,

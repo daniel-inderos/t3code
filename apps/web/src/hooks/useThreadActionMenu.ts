@@ -15,7 +15,12 @@ import {
 } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 
-import { pickSnoozePreset, resolveSnoozePresets } from "../components/Sidebar.snooze";
+import {
+  pickSnoozePreset,
+  resolveLimitResetSnooze,
+  resolveSnoozePresets,
+  shownSnoozePresets,
+} from "../components/Sidebar.snooze";
 import {
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
@@ -133,6 +138,7 @@ export function useThreadActionMenu(input: {
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
       const snoozePresets = resolveSnoozePresets(now, timestampFormat, threadRef.environmentId);
+      const limitResetSnooze = resolveLimitResetSnooze([thread], now, timestampFormat);
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
@@ -147,6 +153,7 @@ export function useThreadActionMenu(input: {
         isRunning: !threadRuntimeCanArchive(thread.runtime),
         supports,
         snoozePresets,
+        limitResetSnooze,
         canShareWithGuest,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
       });
@@ -168,7 +175,7 @@ export function useThreadActionMenu(input: {
           action === "snooze:custom"
             ? await requestCustomSnooze()
             : pickSnoozePreset(
-                snoozePresets,
+                shownSnoozePresets(snoozePresets, limitResetSnooze),
                 action.slice("snooze:".length),
                 timestampFormat,
                 threadRef.environmentId,

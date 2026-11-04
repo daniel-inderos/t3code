@@ -1,6 +1,8 @@
 // @effect-diagnostics globalDate:off -- UI snooze presets use local calendar boundaries and Intl labels.
 import * as DateTime from "effect/DateTime";
+import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import { DEFAULT_SNOOZE_PRESETS, type SnoozePresetSetting } from "@t3tools/contracts/settings";
+import { usageLimitResetsAt } from "@t3tools/shared/usageLimits";
 
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 
@@ -269,15 +271,71 @@ export function resolveSnoozePreset(
   const label = snoozePresetLabel(setting, daysAhead);
   // Durations and "Next week" don't name the wake day, so a wake on another day shows it.
   const labelNamesDay = setting.kind === "at" && label !== "Next week";
-  const time = formatTime(wake);
   return {
     id: snoozePresetId(setting),
     label,
-    whenLabel:
-      labelNamesDay || wake.toDateString() === now.toDateString()
-        ? time
-        : `${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`,
+    whenLabel: labelNamesDay ? formatTime(wake) : snoozeWhenLabel(wake, now, formatTime),
     snoozedUntil: wake.toISOString(),
+  };
+}
+
+function snoozeWhenLabel(wake: Date, now: Date, formatTime: (date: Date) => string): string {
+  const time = formatTime(wake);
+  return wake.toDateString() === now.toDateString()
+    ? time
+    : `${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
+}
+
+const LIMIT_RESET_SNOOZE_ID = "limit-reset";
+
+export type LimitResetSnooze =
+  | { readonly kind: "ready"; readonly preset: SnoozePreset }
+  | { readonly kind: "mixed-providers" };
+
+/**
+ * "Until limits reset" for threads on one provider, waking once every one of them can run
+ * again. Null when none of them is limited.
+ */
+export function resolveLimitResetSnooze(input: {
+  readonly threads: ReadonlyArray<
+    Pick<EnvironmentThreadShell, "environmentId" | "modelSelection" | "runtime">
+  >;
+  readonly providers: (environmentId: EnvironmentId) => ReadonlyArray<ServerProvider> | undefined;
+  readonly now: Date;
+  readonly formatTime?: (date: Date) => string;
+}): LimitResetSnooze | null {
+  const nowMs = input.now.getTime();
+  const providerKeys = new Set<string>();
+  let wakeMs: number | null = null;
+  for (const thread of input.threads) {
+    const instanceId = thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
+    providerKeys.add(`${thread.environmentId}:${instanceId}`);
+    const provider = input
+      .providers(thread.environmentId)
+      ?.find((candidate) => candidate.instanceId === instanceId);
+    // A usage-limit failure carries its own reset, for providers that report no usage windows.
+    const failedResetMs =
+      thread.runtime?.lastErrorClass === "usage_limit" && thread.runtime.usageLimitResetAt
+        ? Date.parse(thread.runtime.usageLimitResetAt)
+        : Number.NaN;
+    for (const ms of [
+      usageLimitResetsAt(provider, nowMs, thread.modelSelection.model),
+      failedResetMs > nowMs ? failedResetMs : null,
+    ]) {
+      if (ms !== null) wakeMs = Math.max(wakeMs ?? ms, ms);
+    }
+  }
+  if (wakeMs === null) return null;
+  if (providerKeys.size > 1) return { kind: "mixed-providers" };
+  const wake = DateTime.toDate(DateTime.makeUnsafe(wakeMs));
+  return {
+    kind: "ready",
+    preset: {
+      id: LIMIT_RESET_SNOOZE_ID,
+      label: "Until limits reset",
+      whenLabel: snoozeWhenLabel(wake, input.now, input.formatTime ?? snoozeTimeOfDayLabel),
+      snoozedUntil: wake.toISOString(),
+    },
   };
 }
 

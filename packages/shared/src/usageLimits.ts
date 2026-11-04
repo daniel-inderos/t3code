@@ -62,6 +62,26 @@ export function exhaustedUsageWindow(
   }
 }
 
+/**
+ * When `model` on `provider` is usable again, or null when it is not blocked or a blocking
+ * window has no known reset. Steps across resets so overlapping windows wake after the last one.
+ */
+export function usageLimitResetsAt(
+  provider: ServerProvider | undefined,
+  now: number,
+  model?: string,
+): number | null {
+  let at = now;
+  for (const _ of provider?.usageLimits?.windows ?? []) {
+    const blocking = exhaustedUsageWindow(provider, at, model);
+    if (!blocking) return at > now ? at : null;
+    const resetMs = blocking.resetsAt ? Date.parse(blocking.resetsAt) : Number.NaN;
+    if (!Number.isFinite(resetMs)) return null;
+    at = resetMs;
+  }
+  return exhaustedUsageWindow(provider, at, model) ? null : at > now ? at : null;
+}
+
 export function resolveNewThreadModelSelection(input: {
   readonly defaultSelection: ModelSelection | null;
   readonly explicitSelection?: ModelSelection | null;

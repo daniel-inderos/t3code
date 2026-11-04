@@ -23,6 +23,7 @@ import {
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  usageLimitResetsAt,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -150,6 +151,43 @@ describe("new thread model fallback", () => {
         ],
       }).selection,
     ).toEqual(usesFallback ? fallback : defaultSelection);
+  });
+});
+
+describe("usage limit reset", () => {
+  const session = { ...window, usedPercent: 100 };
+  const weekly = {
+    ...window,
+    id: "weekly",
+    kind: "weekly",
+    label: "Weekly",
+    usedPercent: 100,
+    resetsAt: "2026-09-05T09:00:00.000Z",
+  } as const;
+  it.each([
+    ["not limited", [window], undefined, null],
+    ["one exhausted window", [session], undefined, session.resetsAt],
+    ["the later of overlapping windows", [session, weekly], undefined, weekly.resetsAt],
+    ["an expired window", [{ ...session, resetsAt: "2026-09-03T11:00:00.000Z" }], undefined, null],
+    ["an unknown reset", [{ ...session, resetsAt: undefined }], undefined, null],
+    [
+      "a pool the model does not use",
+      [{ ...weekly, id: "gemini-weekly" }],
+      "claude-opus-5-5",
+      null,
+    ],
+  ] as const)("resolves %s", (_name, windows, model, expected) => {
+    const driver = model === undefined ? "codex" : "antigravity";
+    expect(
+      usageLimitResetsAt(
+        provider({
+          driver: ProviderDriverKind.make(driver),
+          usageLimits: { checkedAt: "2026-09-03T11:00:00.000Z", windows },
+        }),
+        now,
+        model,
+      ),
+    ).toBe(expected === null ? null : Date.parse(expected));
   });
 });
 

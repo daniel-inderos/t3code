@@ -1,7 +1,10 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
+  type LimitResetSnooze,
   pickSnoozePreset as pickSharedSnoozePreset,
+  resolveLimitResetSnooze as resolveSharedLimitResetSnooze,
   resolveSnoozePresets as resolveSharedSnoozePresets,
   snoozeWakeLabel,
   type SnoozePreset,
@@ -21,6 +24,31 @@ export function resolveSnoozePresets(
   environmentId: EnvironmentId,
 ): ReadonlyArray<SnoozePreset> {
   return resolveSharedSnoozePresets(now, snoozeOptions(timestampFormat, environmentId));
+}
+
+/** "Until limits reset" for these threads, from their environments' latest usage limits. */
+export function resolveLimitResetSnooze(
+  threads: ReadonlyArray<
+    Pick<EnvironmentThreadShell, "environmentId" | "modelSelection" | "runtime">
+  >,
+  now: Date,
+  timestampFormat: TimestampFormat,
+): LimitResetSnooze | null {
+  return resolveSharedLimitResetSnooze({
+    threads,
+    providers: (environmentId) =>
+      appAtomRegistry.get(serverEnvironment.providersValueAtom(environmentId)) ?? undefined,
+    now,
+    formatTime: (date) => formatShortTimestamp(date.toISOString(), timestampFormat),
+  });
+}
+
+/** The presets a menu showed, with its "Until limits reset" choice when it had one. */
+export function shownSnoozePresets(
+  presets: ReadonlyArray<SnoozePreset>,
+  limitReset: LimitResetSnooze | null,
+): ReadonlyArray<SnoozePreset> {
+  return limitReset?.kind === "ready" ? [limitReset.preset, ...presets] : presets;
 }
 
 /** A shown menu choice as picked; see the shared `pickSnoozePreset`. */

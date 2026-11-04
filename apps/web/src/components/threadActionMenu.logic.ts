@@ -1,5 +1,5 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
-import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+import type { LimitResetSnooze, SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 export type ThreadActionMenuId =
   | "find"
@@ -91,6 +91,7 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  readonly limitResetSnooze?: LimitResetSnooze | null;
   /** Guest links need their own grant, so the caller checks it instead of `canOperate`. */
   readonly canShareWithGuest?: boolean;
   /** A No project thread with its own folder, on a server that can promote it. */
@@ -111,6 +112,43 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
     "copy-thread",
     "copy-thread-id",
   ].includes(action);
+}
+
+/** Presets soonest first, then Custom; "Until limits reset" leads when a provider is limited. */
+export function buildSnoozeMenuChildren(
+  presets: ReadonlyArray<SnoozePreset>,
+  limitReset: LimitResetSnooze | null,
+): ReadonlyArray<ContextMenuItem<`snooze:${string}`>> {
+  const limitItems: ReadonlyArray<ContextMenuItem<`snooze:${string}`>> =
+    limitReset === null
+      ? []
+      : limitReset.kind === "ready"
+        ? [
+            {
+              id: `snooze:${limitReset.preset.id}`,
+              label: `${limitReset.preset.label} (${limitReset.preset.whenLabel})`,
+            },
+          ]
+        : [
+            {
+              id: "snooze:limit-reset",
+              label: "Until limits reset (mixed providers)",
+              disabled: true,
+            },
+          ];
+  return [
+    ...limitItems,
+    ...presets.map((preset, index) => ({
+      id: `snooze:${preset.id}` as const,
+      label: `${preset.label} (${preset.whenLabel})`,
+      separatorBefore: index === 0 && limitItems.length > 0,
+    })),
+    {
+      id: "snooze:custom",
+      label: "Custom…",
+      separatorBefore: presets.length > 0 || limitItems.length > 0,
+    },
+  ];
 }
 
 export function buildThreadActionMenuItems(
@@ -152,17 +190,10 @@ export function buildThreadActionMenuItems(
                 label: "Snooze",
                 icon: "clock",
                 disabled: !state.canSnoozeNow,
-                children: [
-                  ...state.snoozePresets.map((preset) => ({
-                    id: `snooze:${preset.id}` as const,
-                    label: `${preset.label} (${preset.whenLabel})`,
-                  })),
-                  {
-                    id: "snooze:custom" as const,
-                    label: "Custom…",
-                    separatorBefore: state.snoozePresets.length > 0,
-                  },
-                ],
+                children: buildSnoozeMenuChildren(
+                  state.snoozePresets,
+                  state.limitResetSnooze ?? null,
+                ),
               },
         ]
       : []),

@@ -1,5 +1,11 @@
 // @effect-diagnostics globalDate:off -- Tests exercise local calendar snooze boundaries.
-import { ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+  ThreadId,
+} from "@t3tools/contracts";
 import { TurnId } from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vite-plus/test";
@@ -9,6 +15,7 @@ import {
   effectiveSnoozed,
   hasQueuedTurnStart,
   pickSnoozePreset,
+  resolveLimitResetSnooze,
   resolveSnoozePresets,
   threadRaisedHandWhileSnoozed,
   threadWokeAt,
@@ -401,4 +408,79 @@ it("dismisses a wake at its timestamp without hiding a later wake", () => {
   expect(isThreadWokeUnseen(state)).toBe(true);
   expect(isThreadWokeUnseen({ ...state, lastVisitedAt: firstWake })).toBe(false);
   expect(isThreadWokeUnseen({ ...state, lastVisitedAt: firstWake, wokeAt: NOW })).toBe(true);
+});
+
+describe("resolveLimitResetSnooze", () => {
+  const environmentId = EnvironmentId.make("env-1");
+  const codex = ProviderInstanceId.make("codex");
+  const claude = ProviderInstanceId.make("claude");
+  const sessionReset = "2026-04-10T14:00:00.000Z";
+  const failureReset = "2026-04-10T16:00:00.000Z";
+  const providers: ReadonlyArray<ServerProvider> = [codex, claude].map((instanceId) => ({
+    instanceId,
+    driver: ProviderDriverKind.make(instanceId === codex ? "codex" : "claudeAgent"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: NOW,
+    models: [],
+    slashCommands: [],
+    skills: [],
+    ...(instanceId === codex
+      ? {
+          usageLimits: {
+            checkedAt: NOW,
+            windows: [
+              {
+                id: "five_hour",
+                kind: "session",
+                label: "5h",
+                usedPercent: 100,
+                resetsAt: sessionReset,
+              },
+            ],
+          },
+        }
+      : {}),
+  }));
+  const thread = (instanceId: ProviderInstanceId, usageLimitResetAt: string | null = null) => ({
+    environmentId,
+    modelSelection: { instanceId, model: "model" },
+    runtime:
+      usageLimitResetAt === null
+        ? null
+        : {
+            status: "failed" as const,
+            activeRunId: null,
+            providerInstanceId: instanceId,
+            providerName: null,
+            lastError: "limit",
+            lastErrorClass: "usage_limit" as const,
+            usageLimitResetAt,
+            updatedAt: NOW,
+          },
+  });
+  const resolve = (threads: ReadonlyArray<ReturnType<typeof thread>>) =>
+    resolveLimitResetSnooze({
+      threads,
+      providers: () => providers,
+      now: new Date(NOW),
+      formatTime: () => "time",
+    });
+
+  it.each([
+    ["an unlimited provider", [thread(claude)], null],
+    ["the provider's exhausted window", [thread(codex)], sessionReset],
+    ["a usage-limit failure without windows", [thread(claude, failureReset)], failureReset],
+    ["the last thread to recover", [thread(codex), thread(codex, failureReset)], failureReset],
+  ] as const)("wakes for %s", (_name, threads, expected) => {
+    const result = resolve(threads);
+    expect(result?.kind === "ready" ? result.preset.snoozedUntil : null).toBe(expected);
+  });
+
+  it("refuses threads on different providers", () => {
+    expect(resolve([thread(codex), thread(claude)])).toEqual({ kind: "mixed-providers" });
+  });
 });
